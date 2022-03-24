@@ -1,0 +1,564 @@
+---
+title: "Assignment 2"
+author: "Arnav Murulidhar"
+date: "3/6/2022"
+output: html_document
+---
+
+This file collects data relevant to the Buffalo Infrastructure project and creates graphics and tables to better visualize both the current and existing conditions of the Buffalo-Cheektowaga-Niagara Falls MSA, GEOID: 15380
+
+
+Create a dot-density map
+Create a histogram
+Create a stacked bar chart or pie chart
+Create a tree map
+Summarize tract statistics
+Apply a ggplot theme
+Customize axes and legends
+Write figures to a file
+
+# Load libraries
+
+```{r}
+library(tidycensus)
+library(tidyverse)
+library(knitr)
+library(sf)
+library(units)
+library(RColorBrewer)
+library(osmdata) 
+library(ggthemes)
+```
+# List census variable names
+```{r}
+vars <- c(total_hhs = 'B08203_001',
+          no_veh = 'B08203_002',
+          
+          hh_1person = 'B08201_007',
+          hh_2person = 'B08201_013',
+          hh_3person = 'B08201_019',
+          hh_4person_plus = 'B08201_025',
+          
+          inc_lt_10k = 'B19001_002',
+          inc_btw_10k_15k = 'B19001_003',
+          inc_btw_15k_20k = 'B19001_004',
+          inc_btw_20k_25k = 'B19001_005',
+          inc_btw_25k_30k = 'B19001_006',
+          inc_btw_30k_35k = 'B19001_007',
+          inc_btw_35k_40k = 'B19001_008',
+          inc_btw_40k_45k = 'B19001_009',
+          inc_btw_45k_50k = 'B19001_010',
+          inc_btw_50k_60k = 'B19001_011',
+          inc_btw_60k_75k = 'B19001_012',
+          inc_btw_75k_100k = 'B19001_013',
+          inc_btw_100k_125k = 'B19001_014',
+          inc_btw_125k_150k = 'B19001_015',
+          inc_btw_150k_200k = 'B19001_016',
+          inc_gt_200k = 'B19001_017',
+          
+          commute_time = 'B08013_001'
+          )
+```
+
+#Download census tract data
+```{r}
+census <- get_acs(geography = "tract", 
+                        variables = vars,
+                        state = 'NY',
+                        county = c('Erie', 
+                                   'Niagara'),
+                        output = "wide",
+                        geometry = TRUE,
+                        year  = 2019,
+                        survey = "acs5")
+```
+
+#Get regional data
+```{r}
+vars <- c(hh_1person = 'B08201_007',
+          hh_2person = 'B08201_013',
+          hh_3person = 'B08201_019',
+          hh_4person_plus = 'B08201_025',
+          inc_lt_10k = 'B19001_002',
+          inc_btw_10k_15k = 'B19001_003',
+          inc_btw_15k_20k = 'B19001_004',
+          inc_btw_20k_25k = 'B19001_005',
+          inc_btw_25k_30k = 'B19001_006',
+          inc_btw_30k_35k = 'B19001_007',
+          inc_btw_35k_40k = 'B19001_008',
+          inc_btw_40k_45k = 'B19001_008',
+          inc_btw_45k_50k = 'B19001_010',
+          inc_btw_50k_60k = 'B19001_011',
+          inc_btw_60k_75k = 'B19001_012',
+          inc_btw_75k_100k = 'B19001_013',
+          inc_btw_100k_125k = 'B19001_014',
+          inc_btw_125k_150k = 'B19001_015',
+          inc_btw_150k_200k = 'B19001_016',
+          inc_gt_200k = 'B19001_017')
+
+region_inc <- get_acs(
+  geography = "metropolitan statistical area/micropolitan statistical area",
+  variables = vars,
+  summary_var = 'B19001_001',
+  geometry = FALSE) %>%
+  filter(GEOID == "15380") %>%
+  mutate(pct = estimate / summary_est) %>%
+  mutate(cumul_pct = cumsum(pct)) %>%
+  select(variable, cumul_pct)
+
+kable(region_inc, digits=2)
+```
+
+#Calculate new variables: Create Quintiles
+```{r}
+census <- census %>%
+  mutate(inc_quint_1 = inc_lt_10kE +
+                       inc_btw_10k_15kE +
+                       inc_btw_15k_20kE +
+                       inc_btw_20k_25kE,
+         inc_quint_2 = inc_btw_25k_30kE +
+                       inc_btw_30k_35kE +
+                       inc_btw_35k_40kE +
+                       inc_btw_40k_45kE +
+                       inc_btw_45k_50kE,
+         inc_quint_3 = inc_btw_50k_60kE +
+                       inc_btw_60k_75kE,
+         inc_quint_4 = inc_btw_75k_100kE,
+         inc_quint_5 = inc_btw_100k_125kE +
+                       inc_btw_125k_150kE +
+                       inc_btw_150k_200kE +
+                       inc_gt_200kE,
+         commute_time = commute_timeE/total_hhsE)
+```
+
+#Download employment data
+```{r}
+lehd_blocks <- read_csv('https://lehd.ces.census.gov/data/lodes/LODES7/ny/wac/ny_wac_S000_JT00_2019.csv.gz', show_col_types = FALSE) %>%
+  rename(total_emp = C000) %>%
+  mutate(basic_emp = CNS01+CNS02+CNS03+CNS04+CNS05+CNS06+CNS08+CNS09) %>%
+  rename(retail_emp = CNS07) %>%
+  mutate(service_emp = total_emp - basic_emp - retail_emp) %>%
+  select(w_geocode, total_emp, basic_emp, retail_emp, service_emp)
+```
+
+#Collapse LEHD data from blocks to tracts
+```{r}
+lehd_tracts <- lehd_blocks %>%
+  mutate(w_geocode = as.character(w_geocode)) %>%
+  mutate(GEOID = substr(w_geocode, 1, 11)) %>%
+  select(-w_geocode) %>%
+  group_by(GEOID) %>%
+  summarize(across(everything(), ~sum(.)))
+```
+
+#Join two data frames: Merging LEHD data to census dataframe; Left join by GEOID
+```{r}
+zones <- left_join(census, lehd_tracts)
+```
+
+#Calculate tract areas
+```{r}
+zones <- zones %>%
+  mutate(tract_area = st_area(geometry))
+```
+
+#Convert units
+```{r}
+zones <- zones %>%
+  mutate(tract_area = set_units(tract_area, "mi2")) 
+```
+
+#Create percent of no vehicle households out of total
+```{r}
+zones <- zones %>%
+  mutate(pct_no_veh = final_data$no_vehE/final_data$total_hhsE)
+```
+
+#Organize data columns
+```{r}
+final_data <- zones %>%
+  select(GEOID, 
+         total_emp,
+         basic_emp,
+         retail_emp,
+         service_emp,
+         total_hhsE,
+         no_vehE,
+         pct_no_veh,
+         commute_time,
+         tract_area,
+         hh_1personE,
+         hh_2personE,
+         hh_3personE,
+         hh_4person_plusE,
+         inc_quint_1,
+         inc_quint_2,
+         inc_quint_3,
+         inc_quint_4,
+         inc_quint_5)
+```
+
+#Separate geometry from dataset
+```{r}
+zone_boundaries <- final_data %>%
+  select(GEOID, geometry)
+```
+
+
+#Write data to a file
+```{r}
+write_csv(final_data, "existing/data/zone_data.csv", append = FALSE)
+st_write(zone_boundaries, "zones/boundaries.geojson", append = FALSE)
+```
+
+
+
+***VISUALIZATION OF DATA***
+
+
+
+#Gather OSM MSA Highway data
+```{r}
+erie_highways <- getbb("Erie County NY United States")%>%
+  opq()%>%
+  add_osm_feature(key = "highway", 
+                  value = c("motorway", "primary")) %>%
+  osmdata_sf()
+
+niagara_highways <- getbb("Niagara County NY United States")%>%
+  opq()%>%
+  add_osm_feature(key = "highway", 
+                  value = c("motorway", "primary")) %>%
+  osmdata_sf()
+
+```
+
+#Gather OSM river data
+```{r}
+erie_water <- getbb("Erie County NY United States")%>%
+  opq()%>%
+  add_osm_feature(key = "water", 
+                  value = c("river", "lake")) %>%
+  osmdata_sf()
+```
+
+#Clean OSM data
+```{r}
+erie_osm_lines <- erie_highways[["osm_lines"]]
+erie_osm_lines_clean <- drop_na(erie_osm_lines, "name")
+
+niagara_osm_lines <- niagara_highways[["osm_lines"]]
+niagara_osm_lines_clean <- drop_na(niagara_osm_lines, "name")
+
+buffalo_skyway <- erie_osm_lines_clean[erie_osm_lines_clean$name == "Buffalo Skyway", ]
+
+erie_water_osm_lines <- erie_water[["osm_lines"]]
+erie_water_osm_lines_clean <- drop_na(erie_water_osm_lines, "name")
+```
+
+#Create a map color palette
+```{r}
+map_palette <- brewer.pal(5, "PuBu")
+```
+
+#Create ggplot map of Buffalo MSA with water bodies, highways and highlighted Buffalo Skyway
+```{r}
+msa_road_river_map <- ggplot() +
+    geom_sf(data = erie_water_osm_lines,
+          inherit.aes = FALSE,
+          color = "light blue") +
+    geom_sf(data = erie_osm_lines_clean,
+          inherit.aes = FALSE,
+          color = "black") +
+    geom_sf(data = niagara_osm_lines_clean,
+          inherit.aes = FALSE,
+          color = "black") +
+    geom_sf(data = buffalo_skyway,
+          inherit.aes = FALSE,
+          size = 1,
+          color = "red") +
+    coord_sf(xlim = c(-79.4,-78.4), ylim = c(42.4,43.4)) +
+    theme_void()
+
+msa_road_river_map
+
+ggsave("images/msa_road_river_map.png",
+       height = 4.25, width = 6.5, units = "in")
+```
+
+#Create ggplot map of focused map of Buffulo city center with water bodies, highways and highlighted Buffalo Skyway
+```{r}
+buffalo_center_road_river_map <- ggplot() +
+    geom_sf(data = erie_water_osm_lines,
+          inherit.aes = FALSE,
+          color = "light blue") +
+    geom_sf(data = erie_osm_lines_clean,
+          inherit.aes = FALSE,
+          color = "black") +
+    geom_sf(data = buffalo_skyway,
+          inherit.aes = FALSE,
+          size = 1,
+          color = "red") +
+    coord_sf(xlim = c(-79.0,-78.7), ylim = c(42.8,43.05)) +
+    theme_void()
+
+buffalo_center_road_river_map
+
+ggsave("images/buffalo_center_road_river_map.png",
+       height = 4.25, width = 6.5, units = "in")
+```
+
+#Create a commute time chloropleth map
+```{r}
+commute_time_map <- ggplot(final_data) +
+  geom_sf(aes(fill = commute_time), color=NA) +
+  scale_fill_gradientn(name = "Average Commute Time in Minutes", 
+                       breaks = size_brks <- seq(0, 45, by = 15),
+                       colors = map_palette,limits =  c(0,45)) +
+  geom_sf(data = erie_osm_lines_clean,
+          inherit.aes = FALSE,
+          color = alpha("black",0.2)) +
+  geom_sf(data = niagara_osm_lines_clean,
+          inherit.aes = FALSE,
+          color = alpha("black",0.2)) +
+  geom_sf(data = buffalo_skyway,
+          inherit.aes = FALSE,
+          size = 1,
+          color = alpha("red",0.2)) + 
+  theme_void()
+  
+
+commute_time_map
+
+
+ggsave("images/commute_time_map.png",
+       height = 4.25, width = 6.5, units = "in")
+```
+
+
+#Create a household size dot density map
+```{r}
+no_zero_hh1 <- filter_at(final_data, vars(hh_1personE), all_vars((.) != 0))
+no_zero_hh2 <- filter_at(final_data, vars(hh_2personE), all_vars((.) != 0))
+no_zero_hh3 <- filter_at(final_data, vars(hh_3personE), all_vars((.) != 0))
+no_zero_hh4 <- filter_at(final_data, vars(hh_4person_plusE), all_vars((.) != 0))
+
+
+hh_1person_pts <- st_sample(no_zero_hh1, 
+                            size = ceiling(no_zero_hh$hh_1personE/100))
+
+hh_2person_pts <- st_sample(no_zero_hh2, 
+                            size = ceiling(no_zero_hh2$hh_2personE/100))
+
+hh_3person_pts <- st_sample(no_zero_hh3, 
+                            size = ceiling(no_zero_hh3$hh_3personE/100))
+
+hh_4person_pts <- st_sample(no_zero_hh4, 
+                            size = ceiling(no_zero_hh4$hh_4person_plusE/100))
+
+
+hh_1person_df <- tibble(hh_size = rep("1 person", 
+                                      length(hh_1person_pts))) %>%
+  st_sf(geom = hh_1person_pts)
+                        
+hh_2person_df <- tibble(hh_size = rep("2 people", 
+                                      length(hh_2person_pts))) %>%
+  st_sf(geom = hh_2person_pts)
+ 
+hh_3person_df <- tibble(hh_size = rep("3 people", 
+                                      length(hh_3person_pts))) %>%
+  st_sf(geom = hh_3person_pts)
+
+hh_4person_df <- tibble(hh_size = rep("4 or more people", 
+                                      length(hh_4person_pts))) %>%
+  st_sf(geom = hh_4person_pts)
+
+hh_size_pts <- rbind(hh_1person_df, hh_2person_df, hh_3person_df, hh_4person_df)
+
+
+household_size_dot_map <- ggplot(final_data) + 
+  geom_sf(color = "white") +
+  geom_sf(data = hh_size_pts, 
+          aes(color = hh_size), 
+          alpha = 0.3,
+          size = 0.1) +
+  scale_color_brewer("Household size\n(each points represents\n100 households)",
+                     palette = "Set1") +
+  theme_void()  +
+  guides(color = guide_legend(override.aes = list(size=5, alpha = 0.6)))
+
+household_size_dot_map
+
+ggsave("images/household_size_dot_map.png",
+       height = 4.25, width = 6.5, units = "in")
+```
+
+#Create a household income dot density map
+```{r}
+no_zero_inc1 <- filter_at(final_data, vars(inc_quint_1), all_vars((.) != 0))
+no_zero_inc2 <- filter_at(final_data, vars(inc_quint_2), all_vars((.) != 0))
+no_zero_inc3 <- filter_at(final_data, vars(inc_quint_3), all_vars((.) != 0))
+no_zero_inc4 <- filter_at(final_data, vars(inc_quint_4), all_vars((.) != 0))
+no_zero_inc5 <- filter_at(final_data, vars(inc_quint_5), all_vars((.) != 0))
+
+
+inc_quint_1_pts <- st_sample(no_zero_inc1, 
+                            size = ceiling(no_zero_inc1$inc_quint_1/100))
+
+inc_quint_2_pts <- st_sample(no_zero_inc2, 
+                            size = ceiling(no_zero_inc2$inc_quint_2/100))
+
+inc_quint_3_pts <- st_sample(no_zero_inc3, 
+                            size = ceiling(no_zero_inc3$inc_quint_3/100))
+
+inc_quint_4_pts <- st_sample(no_zero_inc4, 
+                            size = ceiling(no_zero_inc4$inc_quint_4/100))
+
+inc_quint_5_pts <- st_sample(no_zero_inc5, 
+                            size = ceiling(no_zero_inc5$inc_quint_5/100))
+
+
+hh_1_df <- tibble(hh_inc = rep("1st Quintile", 
+                                      length(inc_quint_1_pts))) %>%
+  st_sf(geom = inc_quint_1_pts)
+                        
+hh_2_df <- tibble(hh_inc = rep("2nd Quintile", 
+                                      length(inc_quint_2_pts))) %>%
+  st_sf(geom = inc_quint_2_pts)
+ 
+hh_3_df <- tibble(hh_inc = rep("3rd Quintile", 
+                                      length(inc_quint_3_pts))) %>%
+  st_sf(geom = inc_quint_3_pts)
+
+hh_4_df <- tibble(hh_inc = rep("4th Quintile", 
+                                      length(inc_quint_4_pts))) %>%
+  st_sf(geom = inc_quint_4_pts)
+
+hh_5_df <- tibble(hh_inc = rep("5th Quintile", 
+                                      length(inc_quint_5_pts))) %>%
+  st_sf(geom = inc_quint_5_pts)
+
+hh_inc_pts <- rbind(hh_1_df, hh_2_df, hh_3_df, hh_4_df, hh_5_df)
+
+
+household_inc_dot_map <- ggplot(final_data) + 
+  geom_sf(color = "white") +
+  geom_sf(data = hh_inc_pts, 
+          aes(color = hh_inc), 
+          alpha = 0.2,
+          size = 0.1) +
+  scale_color_brewer("Households by Income\n(each points represents\n100 households)",
+                     palette = map_palette) +
+  geom_sf(data = buffalo_skyway,
+          inherit.aes = FALSE,
+          size = 1,
+          color = alpha("red",0.2)) + 
+  theme_void()  +
+  guides(color = guide_legend(override.aes = list(size=5, alpha = 0.6)))
+
+household_inc_dot_map
+
+ggsave("images/household_inc_dot_map.png",
+       height = 4.25, width = 6.5, units = "in")
+```
+
+#Create a employment type dot density map
+```{r}
+no_zero_basic <- filter_at(final_data, vars(basic_emp), all_vars((.) != 0))
+no_zero_retail <- filter_at(final_data, vars(retail_emp), all_vars((.) != 0))
+no_zero_service <- filter_at(final_data, vars(service_emp), all_vars((.) != 0))
+
+basic_emp_pts <- st_sample(no_zero_basic, 
+                            size = ceiling(no_zero_basic$basic_emp/100))
+
+retail_emp_pts <- st_sample(no_zero_retail, 
+                            size = ceiling(no_zero_retail$retail_emp/100))
+
+service_emp_pts <- st_sample(no_zero_service, 
+                            size = ceiling(no_zero_service$service_emp/100))
+
+
+basic_emp_df <- tibble(emp = rep("Basic Employment", 
+                                      length(basic_emp_pts))) %>%
+  st_sf(geom = basic_emp_pts)
+                        
+retail_emp_df <- tibble(emp = rep("Retail Employment", 
+                                      length(retail_emp_pts))) %>%
+  st_sf(geom = retail_emp_pts)
+ 
+service_emp_df <- tibble(emp = rep("Service Employment", 
+                                      length(service_emp_pts))) %>%
+  st_sf(geom = service_emp_pts)
+
+emp_pts <- rbind(basic_emp_df, retail_emp_df, service_emp_df)
+
+
+emp_dot_map <- ggplot(final_data) + 
+  geom_sf(color = "white") +
+  geom_sf(data = emp_pts, 
+          aes(color = emp), 
+          alpha = 0.4,
+          size = 0.1) +
+  scale_color_brewer("Employment by Type\n(each points represents\n100 Jobs)",
+                     palette = 'Set2') +
+  geom_sf(data = buffalo_skyway,
+          inherit.aes = FALSE,
+          size = 1,
+          color = alpha("red",0.2)) + 
+  theme_void()  +
+  guides(color = guide_legend(override.aes = list(size=5, alpha = 0.6)))
+
+emp_dot_map
+
+ggsave("images/emp_dot_map.png",
+       height = 4.25, width = 6.5, units = "in")
+```
+
+#Create Histogram of pct of households with no vehicle
+```{r}
+no_veh_hist <- ggplot(final_data) +
+  geom_histogram(aes(x = pct_no_veh),
+                 fill = "salmon2",
+                 color = "salmon1") +
+  scale_y_continuous(name = "Number of census tracts",
+                     breaks = seq(0, 100, by =10)) +
+  scale_x_continuous(name = "Percent of households with no vehicles",
+                     breaks = my_brks <- seq(0, 1, by = 0.05),
+                     labels = paste(my_brks * 100, "%", sep = "")) + 
+  theme_tufte()
+
+no_veh_hist
+
+ggsave("images/no_veh_hist.png",
+       height = 4.25, width = 6.5, units = "in")
+```
+
+#Create Tree Map of Employment types
+```{r}
+tot_emp <- sum(final_data$total_emp,na.rm=TRUE)
+tot_basic_emp <- sum(final_data$basic_emp,na.rm=TRUE)/tot_emp
+tot_retail_emp <- sum(final_data$retail_emp,na.rm=TRUE)/tot_emp
+tot_service_emp <- sum(final_data$service_emp,na.rm=TRUE)/tot_emp
+
+emps <- c(tot_basic_emp, tot_retail_emp, tot_service_emp)
+Employment <- c("basic", "retail", "service")
+empsdf <- data.frame(emps, names)
+
+emp_bar_chart <- ggplot(empsdf, aes(fill=Employment, 
+                   x=1, 
+                   y=emps,
+                   label = emps)) + 
+    geom_bar(stat="identity") + 
+    theme_void()
+
+emp_bar_chart
+
+ggsave("images/emp_bar_chart.png",
+       height = 4.25, width = 6.5, units = "in")
+```
+
+
+
+
+
+
