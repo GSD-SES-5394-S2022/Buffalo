@@ -7,16 +7,6 @@ output: html_document
 
 This file collects data relevant to the Buffalo Infrastructure project and creates graphics and tables to better visualize both the current and existing conditions of the Buffalo-Cheektowaga-Niagara Falls MSA, GEOID: 15380
 
-
-Create a dot-density map
-Create a histogram
-Create a stacked bar chart or pie chart
-Create a tree map
-Summarize tract statistics
-Apply a ggplot theme
-Customize axes and legends
-Write figures to a file
-
 # Load libraries
 
 ```{r}
@@ -29,6 +19,7 @@ library(RColorBrewer)
 library(osmdata) 
 library(ggthemes)
 ```
+
 # List census variable names
 ```{r}
 vars <- c(total_hhs = 'B08203_001',
@@ -203,7 +194,6 @@ final_data <- zones %>%
 zone_boundaries <- final_data %>%
   select(GEOID, geometry)
 ```
-
 
 #Write data to a file
 ```{r}
@@ -556,9 +546,3 @@ emp_bar_chart
 ggsave("images/emp_bar_chart.png",
        height = 4.25, width = 6.5, units = "in")
 ```
-
-
-
-
-
-
