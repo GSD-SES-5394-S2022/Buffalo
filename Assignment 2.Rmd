@@ -5,7 +5,7 @@ date: "3/6/2022"
 output: html_document
 ---
 
-This file collects data relevant to the Buffalo Infrastructure project and creates graphics and tables to better visualize both the current and existing conditions of the Buffalo-Cheektowaga-Niagara Falls MSA, GEOID: 15380
+This file collects data relevant to the Buffalo Infrastructure project and creates graphics and tables to better visualize the existing conditions of the Buffalo-Cheektowaga-Niagara Falls MSA, GEOID: 15380
 
 # Load libraries
 
