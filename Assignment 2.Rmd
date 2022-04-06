@@ -335,7 +335,7 @@ no_zero_hh4 <- filter_at(final_data, vars(hh_4person_plusE), all_vars((.) != 0))
 
 
 hh_1person_pts <- st_sample(no_zero_hh1, 
-                            size = ceiling(no_zero_hh$hh_1personE/100))
+                            size = ceiling(no_zero_hh1$hh_1personE/100))
 
 hh_2person_pts <- st_sample(no_zero_hh2, 
                             size = ceiling(no_zero_hh2$hh_2personE/100))
@@ -523,7 +523,7 @@ ggsave("images/no_veh_hist.png",
        height = 4.25, width = 6.5, units = "in")
 ```
 
-#Create Tree Map of Employment types
+#Create Stacked Bar Chart of Employment types
 ```{r}
 tot_emp <- sum(final_data$total_emp,na.rm=TRUE)
 tot_basic_emp <- sum(final_data$basic_emp,na.rm=TRUE)/tot_emp
@@ -531,10 +531,10 @@ tot_retail_emp <- sum(final_data$retail_emp,na.rm=TRUE)/tot_emp
 tot_service_emp <- sum(final_data$service_emp,na.rm=TRUE)/tot_emp
 
 emps <- c(tot_basic_emp, tot_retail_emp, tot_service_emp)
-Employment <- c("basic", "retail", "service")
+names <- c("basic", "retail", "service")
 empsdf <- data.frame(emps, names)
 
-emp_bar_chart <- ggplot(empsdf, aes(fill=Employment, 
+emp_bar_chart <- ggplot(empsdf, aes(fill=names, 
                    x=1, 
                    y=emps,
                    label = emps)) + 
